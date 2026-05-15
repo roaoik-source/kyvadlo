@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="sk">
+<head>
+    <meta charset="UTF-8">
+    <title>Simulácia dvojitého kyvadla</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: black; color: white; }
+        canvas { border: 1px solid #444; background: #0a0a0a; display: block; margin: 10px auto; }
+        .controls { margin: 15px; text-align: center; }
+        label { margin: 0 10px; }
+    </style>
+</head>
+<body>
+    <h1 style="text-align:center;">Simulácia dvojitého kyvadla</h1>
+    <canvas id="canvas" width="1200" height="2000"></canvas>
+    
+    <div class="controls">
+        <label>Hmotnosť 1 (m1): <input type="number" id="m1" value="5" min="0.1" step="0.1"></label>
+        <label>Hmotnosť 2 (m2): <input type="number" id="m2" value="3" min="0.1" step="0.1"></label><br><br>
+        <label>Dĺžka 1 (l1): <input type="number" id="l1" value="300" min="50" step="10"></label>
+        <label>Dĺžka 2 (l2): <input type="number" id="l2" value="200" min="50" step="10"></label><br><br>
+        <label>Tlmenie: <input type="number" id="damping" value="0" min="0" max="1" step="0.01"></label>
+        <button id="reset">Resetovať kyvadlo</button>
+        <button id="clearTrail">Vymazať trasu</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const pivotX = canvas.width / 2;
+        const pivotY = 500;
+
+        let theta1 = Math.PI / 2;
+        let theta2 = Math.PI / 2;
+        let omega1 = 0;
+        let omega2 = 0;
+        let g = 9.81;
+        let dt = 0.016;
+
+        let m1 = 5, m2 = 3, l1 = 300, l2 = 200, damping = 0;
+
+        let trail = [];           // Trvalá trasa červeného boba
+        let dragging = false;
+        let dragBob = 0;          // 1 = modrý, 2 = červený
+
+        function calculateAccelerations() {
+            const sin1 = Math.sin(theta1), cos1 = Math.cos(theta1);
+            const sin2 = Math.sin(theta2), cos2 = Math.cos(theta2);
+            const sin12 = Math.sin(theta1 - theta2);
+            const cos12 = Math.cos(theta1 - theta2);
+
+            const num1 = -g * (2 * m1 + m2) * sin1 - m2 * g * Math.sin(theta1 - 2 * theta2) 
+                         - 2 * sin12 * m2 * (omega2**2 * l2 + omega1**2 * l1 * cos12);
+            const den1 = l1 * (2 * m1 + m2 - m2 * Math.cos(2 * theta1 - 2 * theta2));
+            let alpha1 = num1 / den1 - damping * omega1;
+
+            const num2 = 2 * sin12 * (omega1**2 * l1 * (m1 + m2) + g * (m1 + m2) * cos1 
+                         + omega2**2 * l2 * m2 * cos12);
+            const den2 = l2 * (2 * m1 + m2 - m2 * Math.cos(2 * theta1 - 2 * theta2));
+            let alpha2 = num2 / den2 - damping * omega2;
+
+            return { alpha1, alpha2 };
+        }
+
+        function update() {
+            const { alpha1, alpha2 } = calculateAccelerations();
+            omega1 += alpha1 * dt;
+            omega2 += alpha2 * dt;
+            theta1 += omega1 * dt;
+            theta2 += omega2 * dt;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const x1 = pivotX + l1 * Math.sin(theta1);
+            const y1 = pivotY + l1 * Math.cos(theta1);
+            const x2 = x1 + l2 * Math.sin(theta2);
+            const y2 = y1 + l2 * Math.cos(theta2);
+
+            // Uloženie pozície do trasy
+            trail.push({x: x2, y: y2});
+
+            // Kreslenie trasy (trvalá)
+            if (trail.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 3;
+                ctx.lineJoin = "round";
+                ctx.lineCap = "round";
+                ctx.moveTo(trail[0].x, trail[0].y);
+                for (let p of trail) {
+                    ctx.lineTo(p.x, p.y);
+                }
+                ctx.stroke();
+            }
+
+            // Tyče
+            ctx.beginPath();
+            ctx.moveTo(pivotX, pivotY);
+            ctx.lineTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = '#cccccc';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Boby
+            ctx.beginPath();
+            ctx.arc(x1, y1, 12 * Math.sqrt(m1), 0, 2 * Math.PI);
+            ctx.fillStyle = '#4488ff';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(x2, y2, 12 * Math.sqrt(m2), 0, 2 * Math.PI);
+            ctx.fillStyle = '#ff4444';
+            ctx.fill();
+        }
+
+        function animate() {
+            if (!dragging) update();
+            draw();
+            requestAnimationFrame(animate);
+        }
+
+        // === MYŠOVÉ OVLÁDANIE ===
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            const x1 = pivotX + l1 * Math.sin(theta1);
+            const y1 = pivotY + l1 * Math.cos(theta1);
+            const x2 = x1 + l2 * Math.sin(theta2);
+            const y2 = y1 + l2 * Math.cos(theta2);
+
+            if (Math.hypot(mx - x2, my - y2) < 35) {
+                dragging = true;
+                dragBob = 2;
+            } else if (Math.hypot(mx - x1, my - y1) < 35) {
+                dragging = true;
+                dragBob = 1;
+            }
+
+            if (dragging) {
+                omega1 = omega2 = 0;
+            }
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (!dragging) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+
+            if (dragBob === 2) {                    // ťaháme červený bob
+                const x1 = pivotX + l1 * Math.sin(theta1);
+                const y1 = pivotY + l1 * Math.cos(theta1);
+                theta2 = Math.atan2(mx - x1, my - y1);
+            } else if (dragBob === 1) {             // ťaháme modrý bob
+                theta1 = Math.atan2(mx - pivotX, my - pivotY);
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => dragging = false);
+        canvas.addEventListener('mouseleave', () => dragging = false);
+
+        // Tlačidlá
+        document.getElementById('reset').addEventListener('click', () => {
+            m1 = parseFloat(document.getElementById('m1').value);
+            m2 = parseFloat(document.getElementById('m2').value);
+            l1 = parseFloat(document.getElementById('l1').value);
+            l2 = parseFloat(document.getElementById('l2').value);
+            damping = parseFloat(document.getElementById('damping').value);
+
+            theta1 = Math.PI / 2;
+            theta2 = Math.PI / 2;
+            omega1 = omega2 = 0;
+        });
+
+        document.getElementById('clearTrail').addEventListener('click', () => {
+            trail = [];
+        });
+
+        animate();
+    </script>
+</body>
+</html>
